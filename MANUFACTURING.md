@@ -12,3 +12,4 @@ Upload these four files to the root of DFB_Firmware_Updater, alongside index.htm
 Backups are local to this site and browser profile. The restore list includes earlier customer-updater records for the same MAC. This release restores those records directly and has no file-import option. Keep your downloaded backup for the Windows recovery procedure if browser storage is lost or browser recovery fails. Update existing board skips backup and leaves the settings ranges untouched.
 
 Manufacturing browser restore has passed simulated tests. A physical USB restore and post-restart check are still needed. Factory programming is for bench validation pending confirmation of the firmware and provisioning sequence.
+Version 0.2 adds browser backup recovery
