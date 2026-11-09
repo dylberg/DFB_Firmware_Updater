@@ -16,8 +16,8 @@ export function validateSecurity(s) {
 }
 const LEGACY_TABLE = '7b4090214ba0b5940db64e2bbe31fdf7f240c3c71d4bed44c41d8ddb4627fef3';
 const DUAL_OTA_TABLE = '684a7f4f8021a542ac6ee5fa1f219f488f943950f74301708050db4f17e2742d';
-const RELEASE_TABLES = {'1.0.0':LEGACY_TABLE,'1.0.1':DUAL_OTA_TABLE};
-const LEGACY_VERSIONS = ['0.1.1','1.0.0'];
+const LEGACY_VERSIONS = ['0.1.0','0.1.0-1','0.1.1','1.0.0'];
+const RELEASE_TABLES = Object.fromEntries([...LEGACY_VERSIONS.map(version=>[version,LEGACY_TABLE]),['1.0.1',DUAL_OTA_TABLE]]);
 const RECOGNIZED_VERSIONS = [...LEGACY_VERSIONS,'1.0.1'];
 
 export async function validateLayout(bytes) {

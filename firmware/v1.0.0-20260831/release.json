@@ -1,0 +1,32 @@
+{
+  "model": "DFB Slim",
+  "version": "1.0.0",
+  "chip": "ESP32-S3",
+  "flashSize": 8388608,
+  "files": [
+    {
+      "name": "bootloader.bin",
+      "offset": 0,
+      "size": 21056,
+      "sha256": "5d8160704dbcf83b08cfd42d0818a91e6b4b0e3810651d71ecdb99274ce902c5"
+    },
+    {
+      "name": "partition-table.bin",
+      "offset": 32768,
+      "size": 3072,
+      "sha256": "7b4090214ba0b5940db64e2bbe31fdf7f240c3c71d4bed44c41d8ddb4627fef3"
+    },
+    {
+      "name": "ota_data_initial.bin",
+      "offset": 49152,
+      "size": 8192,
+      "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+    },
+    {
+      "name": "dfb_slim_fw.bin",
+      "offset": 65536,
+      "size": 761712,
+      "sha256": "a3e37699b1a2c9a59e9dd91de2e5c5f1d4c09aef80f8377107ee056b85360e67"
+    }
+  ]
+}

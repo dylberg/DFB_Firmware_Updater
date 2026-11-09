@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {program,validateFiles,validateSecurity,FLASH_SIZE} from '../core.js';
+import {releases} from '../releases.js';
 const manifest=JSON.parse(await readFile(new URL('../firmware/release.json',import.meta.url)));
 const files=await Promise.all(manifest.files.map(async f=>({...f,data:new Uint8Array(await readFile(new URL('../firmware/'+f.name,import.meta.url)))})));
 function fixture(options={}){
@@ -56,3 +57,34 @@ test('1.0.1 downgrade stops if the secondary slot contains an unknown applicatio
  await assert.rejects(board.run(),/unsupported OTA application/);
  assert.equal(board.wrote,false);
 });
+
+test('build selector keeps different images distinct even when versions match',async()=>{
+ assert.equal(new Set(releases.map(release=>release.id)).size,7);
+ const buildHashes=await Promise.all(releases.map(async release=>{
+   const url=new URL('../'+release.path+'release.json',import.meta.url);
+   const build=JSON.parse(await readFile(url));
+   return build.files[3].sha256;
+ }));
+ assert.equal(new Set(buildHashes).size,7);
+});
+
+for(const release of releases.filter(release=>release.version!=='1.0.1')) {
+ test('bench round trip 1.0.1 → '+release.label+' → 1.0.1',async()=>{
+   const directory=new URL('../'+release.path,import.meta.url);
+   const targetManifest=JSON.parse(await readFile(new URL('release.json',directory)));
+   assert.equal(targetManifest.version,release.version);
+   const targetFiles=await Promise.all(targetManifest.files.map(async file=>({
+     ...file,data:new Uint8Array(await readFile(new URL(file.name,directory))),
+   })));
+   const board=fixture({sourceFiles:nextFiles});
+   await board.run(targetManifest,targetFiles);
+   for(const file of targetFiles) {
+     assert.deepEqual(board.flash.slice(file.offset,file.offset+file.size),file.data);
+   }
+   const restored=await board.run(nextManifest,nextFiles);
+   assert.equal(restored.primaryVersion,release.version);
+   assert.equal(board.flash[0x9000],42);
+   assert.equal(board.flash[0xe000],23);
+   assert.equal(board.flash[0x310000],17);
+ });
+}

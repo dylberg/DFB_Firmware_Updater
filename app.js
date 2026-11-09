@@ -1,19 +1,19 @@
-import {program,validateFiles,sha256,requireThat} from './core.js?v=0.2';
+import {program,validateFiles,sha256,requireThat} from './core.js?v=0.3';
 import {SerialDevice} from './device.js';
+import {releases} from './releases.js?v=0.3';
 const $=id=>document.getElementById(id);
-const releases=new Map();
-const releasePaths={'1.0.1':'./firmware/v1.0.1/','1.0.0':'./firmware/'};
+const packages=new Map();
 let device=null,busy=false,backup=null,session=crypto.randomUUID(),writeStarted=false,logs=[],ready=false,installedVersion;
 function log(text){logs.push(`${new Date().toISOString()} ${String(text).trim()}`);$('terminal').textContent=logs.slice(-500).join('\n');$('terminal').scrollTop=$('terminal').scrollHeight;}
 function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
 function controls(){
-  const version=$('target').value;
+  const selected=packages.get($('target').value);
   $('connect').disabled=busy||!!device||!ready;
-  $('update').disabled=busy||!device||!releases.has(version);
+  $('update').disabled=busy||!device||!selected;
   $('disconnect').disabled=busy||!device;
   $('backup').disabled=busy||!backup;
   $('target').disabled=busy||!ready;
-  $('update').textContent='Install '+version;
+  $('update').textContent=selected?'Install '+selected.release.label:'Install firmware';
 }
 $('target').onchange=controls;
 function download(name,data,type='application/octet-stream'){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([data],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
@@ -34,7 +34,7 @@ $('connect').onclick=async()=>{
   try{
     const port=await navigator.serial.requestPort({filters:[{usbVendorId:0x303a}]});
     session=crypto.randomUUID();writeStarted=false;logs=[];$('finish').hidden=true;$('confirmed').textContent='';$('confirm').disabled=false;$('progress').value=0;document.querySelectorAll('#steps li').forEach(x=>x.className='');
-    log('Browser updater 0.2; '+navigator.userAgent);status('Connecting to controller…');
+    log('Browser updater 0.3; '+navigator.userAgent);status('Connecting to controller…');
     device=new SerialDevice(port,log);await device.connect();
     $('device').textContent='DFB Slim controller connected';$('identity').textContent='Controller '+await device.mac();$('dot').className='dot connected';status('Ready. Click Update to back up and program this controller.');
   }catch(e){log(e.message);await closeDevice();status(e.name==='NotFoundError'?'No controller selected. Connect when ready.':'Connection failed: '+e.message+' Close other programming tools, power-cycle, and reconnect.',e.name!=='NotFoundError');}
@@ -46,13 +46,13 @@ $('update').onclick=async()=>{
     try{wake=await navigator.wakeLock?.request('screen');}catch{}
     // Persistence permission is best-effort; an actual database write/read is mandatory.
     try{await navigator.storage?.persist();}catch{}
-    const {manifest,files}=releases.get($('target').value);
-    log('Selected firmware '+manifest.version);
+    const {release,manifest,files}=packages.get($('target').value);
+    log('Selected firmware '+release.label+' ['+release.id+']');
     const result=await program({device,manifest,files,saveBackup:persistBackup,stage});
     installedVersion=result.targetVersion;
     $('expected-version').textContent=installedVersion;
     $('confirm').textContent='I confirmed '+installedVersion+' in Pelco One';
-    log(JSON.stringify(result));$('finish').hidden=false;
+    log(JSON.stringify({...result,targetBuild:release.id}));$('finish').hidden=false;
     await closeDevice();
   }catch(e){log('ERROR: '+e.message);status((writeStarted?'Update did not finish. Keep the backup. Power-cycle and reconnect to retry; if the layout is no longer recognized, use the Windows recovery/service process. ':'Stopped before programming. ')+e.message,true);await closeDevice();}
   finally{await wake?.release().catch(()=>{});busy=false;controls();}
@@ -65,7 +65,8 @@ window.addEventListener('beforeunload',e=>{if(busy){e.preventDefault();e.returnV
 try{
   requireThat(window.isSecureContext && 'serial' in navigator,'Open this page in desktop Chrome or Edge using HTTPS or localhost.');
   async function fetchFile(path){const r=await fetch(path,{cache:'no-store'});requireThat(r.ok,'Unable to load '+path);return r;}
-  await Promise.all(Object.entries(releasePaths).map(async ([version,path])=>{
+  await Promise.all(releases.map(async release=>{
+    const {version,path}=release;
     const manifest=await (await fetchFile(path+'release.json')).json();
     requireThat(manifest.version===version,'Firmware manifest does not match the version selector.');
     const files=await Promise.all(manifest.files.map(async f=>{
@@ -73,8 +74,9 @@ try{
       return {...f,data:new Uint8Array(await (await fetchFile(path+f.name)).arrayBuffer())};
     }));
     await validateFiles(manifest,files);
-    releases.set(version,{manifest,files});
+    packages.set(release.id,{release,manifest,files});
   }));
-  ready=true;status('Ready to connect.');log('Both firmware packages passed integrity checks.');
+  $('target').replaceChildren(...releases.map(release=>new Option(release.label,release.id)));
+  ready=true;status('Ready to connect.');log(packages.size+' firmware packages passed integrity checks.');
   const store=await db();try{const all=await new Promise((resolve,reject)=>{const r=store.transaction('sessions').objectStore('sessions').getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});backup=all.sort((a,b)=>b.date.localeCompare(a.date))[0]||null;if(backup)log('Previous backup available with Save backup: '+backup.mac);}finally{store.close();}
 }catch(e){status(e.message,true);log(e.message);}finally{controls();}
