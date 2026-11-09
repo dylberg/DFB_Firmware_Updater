@@ -1,41 +1,51 @@
-# TraffiCalm DFB Slim browser updater — bench release 0.1
+# DFB Slim browser updater
 
-Desktop Chrome / Edge, USB-C, firmware 1.0.0. No installed customer application, Python, Node, or browser extension is needed once hosted. Open the HTTPS page directly, not inside a site-builder preview or embedded frame.
+Engineering handoff for browser updater 0.1 and DFB Slim firmware 1.0.0. The package contains the customer page, source, pinned firmware, vendored dependencies and automated tests. It runs as a static HTTPS site in desktop Chrome or Edge. No application install or build step is required to use the hosted page.
 
-## Try locally
+## Take ownership
 
-With Node installed, run `node serve.mjs` from this folder, then open http://127.0.0.1:4173 in desktop Chrome or Edge. This is a developer convenience; customers will use the hosted URL. Do not double-click index.html: firmware fetches and browser permissions require a proper origin.
+1. Put the contents of this folder in an Engineering-owned repository. Keep `index.html`, `.nojekyll`, `firmware/` and `vendor/` at the publishing root.
+2. Assign an Engineering owner for firmware compatibility, release approval, hosting and service recovery. Keep release commits and exact firmware binaries traceable together.
+3. Publish a bench URL under Engineering's account. For GitHub Pages, publish from `main` at `/ (root)`. Review the publishing workflow and open the deployed page to confirm it loads the intended release. Use an HTTPS link that opens the page directly.
+4. Complete the release checks below before distributing the customer link. If the host changes, export needed backups from the old site first. Browser backups belong to the original site origin and browser profile. They do not follow the user to a new domain.
 
-1. Close the Windows updater, Espressif tool and any serial terminal.
-2. Connect a powered DFB Slim controller using the internal USB-C data cable.
-3. Click Connect controller and choose the ESP32-S3 device in the browser picker.
-4. Click Update. Keep the tab open and power/USB connected. The page checks compatibility, reads a full 8 MB backup, saves and reads it back from browser storage, writes four files and verifies firmware plus settings.
-5. Once programming is verified, save a backup copy, power-cycle the controller, and confirm version 1.0.0 in Pelco One. The page’s confirmation button records your observation; it does not query Pelco One.
+Current reference deployment: https://dylberg.github.io/DFB_Firmware_Updater/
 
-Backups remain in IndexedDB on the same browser profile and website origin. Save backup downloads the latest backup as a raw 8 MB BIN. Backups are not sent anywhere. Clearing browser data/private browsing can remove them. The session log is downloadable separately. A failed backup write or readback stops before programming.
+## Run and test locally
 
-## GitHub Pages
+From this folder, run `node --test tests/*.test.mjs` with Node.js 24. The tests use the included firmware files and a simulated controller. Run `node serve.mjs` and open http://127.0.0.1:4173 in Chrome or Edge for a local bench session.
 
-Create the engineering-owned repository (suggested name: DFB_Firmware_Updater). Copy this folder's contents into the repository root. In Settings → Pages choose Deploy from a branch, main, / (root). Use the HTTPS address GitHub returns; no build or external CDN is required. All paths are relative, including firmware and vendor scripts, so project subpaths work.
+Connect the powered controller with a USB-C data cable. Close other serial tools. Click **Connect controller**, select the controller in the browser, then click **Update**. Keep power and USB connected until verification completes. Power-cycle the controller and confirm firmware version and sign operation in Pelco One. The confirmation button records the operator's observation.
 
-This package does not create a GitHub repository or publish to the TraffiCalm organization. The existing SE_Sign_Simulator site is separate and is not modified.
+## Compatibility and write behavior
 
-## Scope and verification
+- Supported path: DFB Slim with ESP32-S3, 8 MB flash, the supplied partition layout, security flags and flash crypt count both zero, and a recognized `dfb_slim_fw` image at version 0.1.1 or 1.0.0. An installed OTA descriptor, if detected, must pass the same project/version checks. The factory image descriptor may differ from the currently running OTA version.
+- Before programming, the updater checks firmware hashes and controller identity, reads all 8 MB, and verifies the backup after saving it in browser storage. **Save backup** exports a raw 8 MB BIN. **Save log** exports the session record.
+- The release writes the bootloader at `0x0000`, partition table at `0x8000`, initial OTA data at `0xC000`, and application at `0x10000`. Flash header settings are preserved. Writing the initial OTA data resets OTA boot selection.
+- The updater verifies the firmware readback and compares NVS, PHY calibration and storage with the backup. The update writes only the approved ranges. A failed check stops the workflow and reports the error.
 
-This is a NEW browser implementation requiring a physical browser bench run. Successful Windows updater tests do not establish browser transport compatibility. Tests exercise real firmware integrity and simulated device workflows. They do not operate the USB hardware.
+## Release a firmware update
 
-Only ESP32-S3, 8 MB flash, security flags=0/crypt count=0, the exact supplied partition table, and recognized dfb_slim_fw factory versions 0.1.1/1.0.0 are accepted. The factory descriptor is not necessarily the currently running OTA version. Existing OTA descriptors, when present, must also be recognized. Blank, secured, unidentified or differently partitioned devices are rejected.
+1. Obtain the approved binaries, flash map, hardware revisions and migration rules from Firmware Engineering. Verify what must be preserved and which image should boot after a power cycle.
+2. Update `firmware/release.json` with the approved filenames, offsets, exact byte sizes and SHA-256 hashes. Update the target release and supported source versions in `core.js` based on the validated migration paths. Its current target is explicitly pinned to 1.0.0. Review the flash range and partition guards whenever the layout changes.
+3. Update the displayed target and confirmation text in `index.html` and the target version in the session log in `app.js`. Update test fixtures and rerun the suite. Keep the vendor licenses and notices with the packaged browser libraries.
+4. Record the reviewed commit, firmware hashes, bench results, approver and published URL. Keep the previous site release available to redeploy if hosting or UI changes regress. Any controller downgrade needs its own validation.
 
-Writes: bootloader 0x0000; partition table 0x8000; OTA data 0xC000; application 0x10000. Flash header settings are kept unchanged. No full-chip erase, eFuse operation, security override or automatic backup restore exists. NVS at 0x9000, PHY at 0xE000 and storage at 0x310000 are read back and compared after programming. OTA boot metadata is deliberately reinitialized by the supplied firmware package, matching the tested manual/Windows process.
+`app.js` handles the page, browser storage and logs. `core.js` enforces release compatibility and controls the update sequence. `device.js` wraps the vendored esptool-js Web Serial adapter. The manifest hashes check file integrity. Release authenticity depends on control of the repository and publishing path.
 
-After interruption: save the log and backup. Power-cycle and reconnect. Retry only if compatibility checks pass. If a partial write prevents recognition, contact Technical Services and use the qualified Windows/manual service procedure. The Windows app also rejects unknown layouts; it is not an automatic full-backup restore tool. Do not restore backups across controllers.
+## Evidence and remaining release checks
 
-Before customer release: test browser connection, multiple board revisions, known 0.1.1 migration, settings/normal sign operation after restart, cable removal during backup and write, retry/service recovery, denied storage and port permission, and managed Chrome/Edge policy restrictions. Bench release labeling should remain until those checks pass.
+The November 5 Chrome bench log shows one complete browser reinstall of 1.0.0 on an ESP32-S3 controller. The 8 MB backup took about 83 seconds. All four writes, firmware readback and preserved-settings checks passed. The operator power-cycled and confirmed 1.0.0 in Pelco One. The separately tested Windows updater succeeded on multiple boards.
 
-Future releases belong in firmware/release.json with reviewed binary hashes and compatibility rules. Current code deliberately restricts target version to 1.0.0. Do not simply replace BIN files or remove compatibility checks. SHA-256 detects corruption; the manifest is not a cryptographically signed release. Protect repository publishing access.
+Engineering should document these checks before customer rollout:
 
-## Development
+- Migrate an actual 0.1.1 controller and verify the running version, existing settings and normal sign operation after a power cycle.
+- Repeat on each supported hardware revision. Exercise managed Chrome and Edge, including permission denial and unavailable browser storage.
+- Disconnect USB during backup and during a write on a backed-up bench controller. Verify the resulting message and the service recovery path.
+- Verify the hosted page in a clean browser session, including access to all firmware and vendor files. Confirm the published version against the approved release.
 
-`node --test tests/*.test.mjs` runs workflow tests. No install step. Source: app.js (UI/storage), core.js (checks/workflow), device.js (Web Serial adapter). esptool-js 0.7.1 and SparkMD5 3.0.2 are bundled under vendor with their licenses. esptool-js includes pako and Espressif stubs. READ_FLASH packets and the final MD5 trailer are validated; firmware additionally has readback byte comparisons.
+## Service recovery
 
-Support: 1-844-457-3526.
+Capture the log and export the backup before clearing browser data or switching host/profile. The customer page can retry when compatibility checks pass. For a controller that fails to boot or no longer passes those checks, use the Engineering-approved service procedure.
+
+A Windows esptool restore of a full pre-erase 8 MB backup was verified on the original controller, followed by a power cycle and successful Pelco One reconnection. Before a service restore, confirm the backup belongs to the connected controller by MAC and verify its byte size and SHA-256 against the original log. Treat backups as controller-specific service data and keep them out of the public repository.
