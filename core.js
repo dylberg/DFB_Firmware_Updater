@@ -14,19 +14,28 @@ export function validateSecurity(s) {
   // Qualified hardware reports flags=0 and crypt count=0. Fail closed on all other profiles.
   requireThat(s?.chipId===9 && s.flags===0 && s.flashCryptCnt===0,'Controller security settings are outside this updater’s supported profile. Contact Technical Services.');
 }
-export function validateLayout(bytes,files) {
-  const table=files.find(f=>f.offset===0x8000);
-  requireThat(table && same(bytes.subarray(0x8000,0x8000+table.data.length),table.data),'Controller memory layout differs from this firmware package. No update is permitted.');
+const LEGACY_TABLE = '7b4090214ba0b5940db64e2bbe31fdf7f240c3c71d4bed44c41d8ddb4627fef3';
+const DUAL_OTA_TABLE = '684a7f4f8021a542ac6ee5fa1f219f488f943950f74301708050db4f17e2742d';
+const RELEASE_TABLES = {'1.0.0':LEGACY_TABLE,'1.0.1':DUAL_OTA_TABLE};
+const LEGACY_VERSIONS = ['0.1.1','1.0.0'];
+const RECOGNIZED_VERSIONS = [...LEGACY_VERSIONS,'1.0.1'];
+
+export async function validateLayout(bytes) {
+  const tableHash=await sha256(bytes.subarray(0x8000,0x8c00));
+  requireThat(tableHash===LEGACY_TABLE || tableHash===DUAL_OTA_TABLE,'Controller memory layout is outside the supported bench profiles.');
+  const versions=tableHash===LEGACY_TABLE?LEGACY_VERSIONS:['1.0.1'];
   const d=descriptor(bytes,0x10000);
-  requireThat(d?.project==='dfb_slim_fw' && d.chip===9 && ['0.1.1','1.0.0'].includes(d.version),'Existing DFB Slim firmware is not recognized or its factory version is unsupported.');
-  if(bytes.length>0x190100) {
+  requireThat(d?.project==='dfb_slim_fw' && d.chip===9 && versions.includes(d.version),'Existing DFB Slim primary firmware is not recognized for this memory layout.');
+  if(bytes.length>=0x190100) {
     const ota=descriptor(bytes,0x190000);
-    requireThat(!ota || (ota.project==='dfb_slim_fw' && ota.chip===9 && ['0.1.1','1.0.0'].includes(ota.version)),'An unsupported OTA application is present.');
+    if(ota || bytes[0x190000]===0xe9) {
+      requireThat(ota?.project==='dfb_slim_fw' && ota.chip===9 && RECOGNIZED_VERSIONS.includes(ota.version),'An unsupported OTA application is present.');
+    }
   }
   return d;
 }
 export async function validateFiles(manifest,files) {
-  requireThat(manifest.model==='DFB Slim' && manifest.version==='1.0.0' && files.length===4,'Unsupported firmware release.');
+  requireThat(manifest.model==='DFB Slim' && Object.hasOwn(RELEASE_TABLES,manifest.version) && files.length===4,'Unsupported firmware release.');
   const expected=[0,0x8000,0xc000,0x10000];
   for(let i=0;i<4;i++) {
     const f=files[i];
@@ -35,6 +44,9 @@ export async function validateFiles(manifest,files) {
     requireThat(i===3 || Math.ceil((f.offset+f.size)/4096)*4096<=expected[i+1],'Firmware sectors overlap.');
     for(const p of PRESERVED) requireThat(f.offset+Math.ceil(f.size/4096)*4096<=p.offset || f.offset>=p.offset+p.size,'Firmware would overwrite settings.');
   }
+  requireThat(files[1].size===3072 && files[1].sha256===RELEASE_TABLES[manifest.version],'Partition table does not match the selected firmware version.');
+  requireThat(files[2].size===8192 && files[2].data.every(byte=>byte===0xff),'OTA selection data must be blank.');
+  requireThat(files[3].size<=0x180000,'Firmware exceeds the primary application partition.');
   const d=descriptor(files[3].data);
   requireThat(d?.project==='dfb_slim_fw' && d.version===manifest.version && d.chip===9,'Firmware identity check failed.');
   requireThat(files[0].data[0]===0xe9 && files[0].data[12]===9,'Incorrect bootloader chip.');
@@ -47,13 +59,14 @@ export async function program({device,manifest,files,saveBackup,stage}) {
   requireThat(await device.capacity()===FLASH_SIZE,'This release requires an 8 MB controller.');
   const mac=await device.mac();
   requireThat(/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac),'Controller identity could not be read.');
-  validateLayout(await device.read(0,0x11000),files);
+  const primary=await validateLayout(await device.read(0,0x11000));
   stage('Backing up controller',0);
   const backup=await device.read(0,FLASH_SIZE,(n)=>stage('Backing up controller',n/FLASH_SIZE));
   requireThat(backup.length===FLASH_SIZE,'Backup is incomplete.');
-  const factory=validateLayout(backup,files);
+  const source=await validateLayout(backup);
+  requireThat(source.version===primary.version,'Controller firmware changed during backup.');
   const backupHash=await sha256(backup);
-  await saveBackup({bytes:backup,sha256:backupHash,mac,factoryVersion:factory.version});
+  await saveBackup({bytes:backup,sha256:backupHash,mac,factoryVersion:source.version});
   requireThat(await device.mac()===mac,'Controller identity changed.');
   await validateFiles(manifest,files);
   stage('Programming firmware',0);
@@ -67,5 +80,5 @@ export async function program({device,manifest,files,saveBackup,stage}) {
     requireThat(same(await device.read(p.offset,p.size),backup.subarray(p.offset,p.offset+p.size)),p.name+' verification failed. Keep the backup and contact Technical Services.');
   }
   stage('Programming verified — power-cycle the controller',1);
-  return {mac,backupHash,factoryVersion:factory.version,targetVersion:manifest.version,awaitingPowerCycle:true};
+  return {mac,backupHash,primaryVersion:source.version,targetVersion:manifest.version,awaitingPowerCycle:true};
 }
